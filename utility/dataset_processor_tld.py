@@ -11,8 +11,8 @@ import sys
 
 # tldextract가 main parts를 인식하지 못하여 모든 부분을 [.TLD]로 처리하는 경우를 대비하여 새 wrap_tld2 개발.
 # 두 가지 옵션의 추출기 미리 생성
-extract_true = tldextract.TLDExtract(include_psl_private_domains=True)
-extract_false = tldextract.TLDExtract(include_psl_private_domains=False)
+extract_true = tldextract.TLDExtract(suffix_list_urls=None, include_psl_private_domains=True, cache_dir=None)
+extract_false = tldextract.TLDExtract(suffix_list_urls=None, include_psl_private_domains=False, cache_dir=None)
 
 def get_processed_result(ext):
     """tldextract 객체의 결과물을 받아 대괄호 변환된 문자열을 반환하는 내부 함수"""
