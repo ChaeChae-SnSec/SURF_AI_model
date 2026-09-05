@@ -14,6 +14,25 @@ import sys
 extract_true = tldextract.TLDExtract(suffix_list_urls=None, include_psl_private_domains=True, cache_dir=None)
 extract_false = tldextract.TLDExtract(suffix_list_urls=None, include_psl_private_domains=False, cache_dir=None)
 
+def to_esld(domain):
+    """유효 2단계 도메인(eSLD)만 남긴다. 접미사(TLD)는 버린다.
+
+    DRIFT 체크포인트는 TLD 를 뗀 문자열로 학습되어 있다. 데이터셋의 T*_eSLD 설정을
+    보면 kara1, salta-gaming, jocastaresorts.tumblr 처럼 접미사가 없다.
+    .com 을 붙인 채로 넣으면 학습 분포와 어긋나 판별이 무너진다.
+    """
+    if not domain:
+        return domain
+
+    domain = domain.lower().strip().rstrip('.')
+    ext = extract_false(domain)
+
+    parts = [x for x in (ext.subdomain, ext.domain) if x]
+    if not parts:
+        return domain          # 접미사를 못 가려내면 원본을 그대로 쓴다
+    return ".".join(parts)
+
+
 def get_processed_result(ext):
     """tldextract 객체의 결과물을 받아 대괄호 변환된 문자열을 반환하는 내부 함수"""
     # 1. 앞부분(Subdomain + Domain) 결합

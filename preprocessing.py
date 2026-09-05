@@ -301,6 +301,84 @@ class FineTuningDataset(Dataset) :
         else :
             return torch.tensor(X_token, dtype=torch.long), torch.tensor(X_char, dtype=torch.long), torch.tensor(y, dtype=torch.long)
 
+class DriftFineTuningDataset(Dataset) :
+    """DRIFT(DSN 2026) 체크포인트용 전처리.
+
+    SURF 의 FineTuningDataset 과 세 가지가 다르다. 가중치를 바꿔 끼울 때 전처리도
+    같이 바뀌어야 해서 별도 클래스로 둔다.
+
+      1. TLD 를 [.co][.kr] 로 감싸지 않는다. DRIFT 의 문자 어휘는 a-z, 0-9, '-', '.'
+         뿐이라 대괄호가 들어가면 전부 UNK 가 된다.
+      2. 특수 토큰이 5개로 고정이다. 토크나이저에서 읽어오면 개수가 달라져
+         문자 인덱스가 통째로 밀린다.
+      3. 길이를 넘기면 앞에서 자르고 절단 토큰을 넣지 않는다.
+    """
+
+    def __init__(self, df=None, domain_col='domain', label_col='label',
+                 special_ids=SpecialIDs, max_len_t=30, max_len_c=77, tokenizer=None):
+        self.df = df
+        self.domain_col = domain_col
+        self.label_col = label_col
+        self.max_len_t = max_len_t
+        self.max_len_c = max_len_c
+        self.tokenizer = tokenizer
+        if tokenizer is None :
+            raise ValueError("Tokenizer must be required.")
+
+        self.special_ids = special_ids
+        self.pad_idx = special_ids.pad_id
+        self.unk_idx = special_ids.unk_id
+        self.mask_idx = special_ids.mask_id
+        self.cls_idx = special_ids.cls_id
+        self.sep_idx = special_ids.sep_id
+
+        self.char_list = list("abcdefghijklmnopqrstuvwxyz0123456789-.")
+        self.special_tokens = ['[PAD]', '[UNK]', '[CLS]', '[SEP]', '[MASK]']
+        self.all_tokens = self.special_tokens + self.char_list
+
+        self.char2id = {char: idx for idx, char in enumerate(self.all_tokens)}
+        self.id2char = {idx: char for idx, char in enumerate(self.all_tokens)}
+
+    def domain_to_ids(self, domain):
+        domain = domain.lower()
+
+        token_indices = [self.char2id.get(c, self.unk_idx) for c in domain]
+
+        if len(token_indices) > self.max_len_c - 2:
+            token_indices = token_indices[:self.max_len_c - 2]
+
+        ids = [self.cls_idx] + token_indices + [self.sep_idx]
+
+        if len(ids) < self.max_len_c:
+            ids += [self.pad_idx] * (self.max_len_c - len(ids))
+
+        return np.array(ids, dtype=np.int64)
+
+    def domain_to_token(self, domain) :
+        domain = domain.lower()
+        encoded = self.tokenizer(domain, add_special_tokens=False)
+        token_indices = encoded["input_ids"]
+
+        if len(token_indices) > self.max_len_t - 2:
+            token_indices = token_indices[:self.max_len_t - 2]
+
+        ids = [self.cls_idx] + token_indices + [self.sep_idx]
+
+        if len(ids) < self.max_len_t:
+            ids += [self.pad_idx] * (self.max_len_t - len(ids))
+
+        return np.array(ids, dtype=np.int64)
+
+    def __len__(self):
+        return self.df.shape[0]
+
+    def __getitem__(self, idx):
+        domain, label = self.df.row(idx)
+        return (torch.tensor(self.domain_to_token(domain), dtype=torch.long),
+                torch.tensor(self.domain_to_ids(domain), dtype=torch.long),
+                torch.tensor(np.int64(label), dtype=torch.long))
+
+
 if __name__ == '__main__':
 
     from transformers import PreTrainedTokenizerFast
