@@ -15,8 +15,23 @@ class TokenEmbedding(nn.Module):
         return self.embedding(input)
     
 class PositionalEncoding(nn.Module):
-    def __init__(self, d_model, max_len):
+    """위치 인코딩. 고정형과 학습형을 모두 지원한다.
+
+    체크포인트마다 방식이 다르다. TLD-aware 로 학습한 SURF 가중치는 고정 sinusoidal
+    이고, DRIFT(DSN 2026) 가중치는 학습형 임베딩이라 state_dict 에
+    positional_encoding_*.pos_embed.weight 가 들어 있다. 둘을 한 클래스에서
+    받아야 가중치를 바꿔 끼울 때 모델 코드를 건드리지 않는다.
+    """
+
+    def __init__(self, d_model, max_len, learned=False):
         super().__init__()
+        self.learned = learned
+
+        if learned:
+            self.pos_embed = nn.Embedding(max_len, d_model)
+            torch.nn.init.xavier_normal_(self.pos_embed.weight)
+            return
+
         P_E = torch.zeros(max_len, d_model)
         pos = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
         _2i = torch.arange(0, d_model, step= 2, dtype=torch.float)
@@ -28,6 +43,11 @@ class PositionalEncoding(nn.Module):
         self.register_buffer('pe', P_E.unsqueeze(0))
         
     def forward(self, x) :
+        if self.learned:
+            B, L, _ = x.size()
+            pos_ids = torch.arange(L, device=x.device).unsqueeze(0).expand(B, L)
+            return x + self.pos_embed(pos_ids)
+
         seq_len = x.size(1)
         pe_slice = self.pe[:, :seq_len, :]
         return x + pe_slice
@@ -116,7 +136,8 @@ class TOVHead(nn.Module):
     
 class PretrainedModel(nn.Module) :
     def __init__(self, vocab_size, d_model, n_heads, dim_feedforward, 
-                 num_layers, max_len, dropout=0.1, padding_idx=0, tov_norm='cls') :
+                 num_layers, max_len, dropout=0.1, padding_idx=0, tov_norm='cls',
+                 learned_pe=False) :
         super().__init__()
 
         self.d_model = d_model
@@ -125,7 +146,7 @@ class PretrainedModel(nn.Module) :
         self.tov_norm = tov_norm
 
         self.embedding = TokenEmbedding(vocab_size, d_model, padding_idx)
-        self.positional_encoding = PositionalEncoding(d_model, max_len)
+        self.positional_encoding = PositionalEncoding(d_model, max_len, learned=learned_pe)
         self.transformer = Transformer(d_model, n_heads, dim_feedforward, num_layers, dropout)
 
         self.mtp_head = MTPHead(d_model, vocab_size)
